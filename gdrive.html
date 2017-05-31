@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+		<head>
+			<script src="https://apis.google.com/js/api.js"></script>
+			<script>
+				const FILE = 'res-storage-ff.json';
+
+				const ready = new Promise(resolve => {
+					gapi.load('client:auth2', () => {
+						gapi.client.init({
+							clientId: '105571180393-8c75sktsum0rnnjl21kco5al3f1lrpsc',
+							scope: 'https://www.googleapis.com/auth/drive.appdata',
+						}).then(resolve);
+					});
+				});
+
+				async function create() {
+					return (await gapi.client.request({
+						method: 'POST',
+            body: { name: FILE, parents: ['appDataFolder'] },
+						params: { fields: 'id', alt: 'json' },
+						path: '/drive/v3/files',
+					})).result.id;
+				};
+
+				async function getId() {
+					const response = (await gapi.client.request({
+						method: 'GET',
+						params: { fields: 'files(id)', q: `name="${FILE}"`, spaces: 'appDataFolder' },
+						path: '/drive/v3/files',
+					})).result;
+					const file = response.files[0];
+					return file && file.id || create();
+				};
+
+				async function read() {
+					return (await gapi.client.request({
+						method: 'GET',
+						params: { alt: 'media' },
+						path: `/drive/v3/files/${await getId()}`,
+					})).result;
+				}
+
+				async function write(data) {
+					return gapi.client.request({
+						body: data,
+						method: 'PATCH',
+						params: { uploadType: 'media' },
+						path: `/upload/drive/v3/files/${await getId()}`,
+					});
+				}
+
+				window.addEventListener('message', async e => {
+					if (!e.origin.endsWith("reddit.com")) return;
+					const msg = e.data;
+					try {
+						let data;
+						switch (msg.type) {
+							case 'init':
+								await ready;
+								await gapi.auth2.getAuthInstance().signIn();
+								break;
+							case 'backup':
+								await write(msg.data);
+								break;
+							case 'restore':
+								data = await read();
+								break;
+						}
+						e.source.postMessage({ type: msg.type, data }, '*');
+					} catch (error) {
+						console.error(error);
+						e.source.postMessage({ type: 'error', data: error.message || error.error }, '*');
+					}
+				}, '*');
+			</script>
